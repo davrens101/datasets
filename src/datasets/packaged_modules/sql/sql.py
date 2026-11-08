@@ -58,8 +58,11 @@ class SqlConfig(datasets.BuilderConfig):
 
                 if isinstance(sql, sqlalchemy.sql.Selectable):
                     engine = sqlalchemy.create_engine(config_kwargs["con"].split("://")[0] + "://")
-                    sql_str = str(sql.compile(dialect=engine.dialect))
-                    config_kwargs["sql"] = sql_str
+                    compiled = sql.compile(dialect=engine.dialect)
+                    sql_str = str(compiled)
+                    # Include the bound parameters in the cache key: compiled SQL is
+                    # identical for queries that only differ by parameter values.
+                    config_kwargs["sql"] = sql_str + " -- params: " + repr(dict(compiled.params))
                 else:
                     raise TypeError(
                         f"Supported types for 'sql' are string and sqlalchemy.sql.Selectable but got {type(sql)}: {sql}"
