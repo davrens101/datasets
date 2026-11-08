@@ -69,13 +69,13 @@ def _batch_arrow_table(table: pa.Table) -> pa.Table:
 
 
 def _keys_differ(left, right):
-    \"\"\"Return a boolean array indicating where ``left`` and ``right`` differ.
+    """Return a boolean array indicating where ``left`` and ``right`` differ.
 
     Unlike ``pc.not_equal``, null values are treated as a regular value: two nulls
     are considered equal, and a null is different from any non-null value. The
     Arrow null type (all values null) is handled as well, since ``pc.not_equal``
     has no kernel for it.
-    \"\"\"
+    """
     left_type = getattr(left, "type", None)
     right_type = getattr(right, "type", None)
     if pa.types.is_null(left_type) and pa.types.is_null(right_type):
