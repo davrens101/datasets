@@ -68,6 +68,30 @@ def _batch_arrow_table(table: pa.Table) -> pa.Table:
     return pa.Table.from_arrays(batched_columns, names=table.column_names)
 
 
+def _keys_differ(left, right):
+    \"\"\"Return a boolean array indicating where ``left`` and ``right`` differ.
+
+    Unlike ``pc.not_equal``, null values are treated as a regular value: two nulls
+    are considered equal, and a null is different from any non-null value. The
+    Arrow null type (all values null) is handled as well, since ``pc.not_equal``
+    has no kernel for it.
+    \"\"\"
+    left_type = getattr(left, "type", None)
+    right_type = getattr(right, "type", None)
+    if pa.types.is_null(left_type) and pa.types.is_null(right_type):
+        n = len(left) if hasattr(left, "__len__") else 1
+        return pa.array([False] * n, type=pa.bool_())
+    if pa.types.is_null(left_type) or pa.types.is_null(right_type):
+        n = len(left) if hasattr(left, "__len__") else 1
+        return pa.array([True] * n, type=pa.bool_())
+    left_null = pc.is_null(left)
+    right_null = pc.is_null(right)
+    one_null = pc.xor(left_null, right_null)
+    both_valid = pc.and_(pc.is_valid(left), pc.is_valid(right))
+    nonnull_diff = pc.and_(both_valid, pc.fill_null(pc.not_equal(left, right), False))
+    return pc.or_(one_null, nonnull_diff)
+
+
 def _batch_accumulate_arrow_table_by_columns(
     table: pa.Table, indices: list[int], columns: tuple[str], tables_accumulator: list[pa.Table], length: Optional[int]
 ) -> pa.Table:
@@ -75,7 +99,9 @@ def _batch_accumulate_arrow_table_by_columns(
     # keep accumulating if key is the same, otherwise include the accumulated tables
     if tables_accumulator and accumulate_last_batch:
         for column in columns:
-            if any(pc.not_equal(table[column], tables_accumulator[0][column][0]).to_pylist()):
+            scalar_value = tables_accumulator[0][column][0]
+            scalar = pa.scalar(scalar_value, type=table[column].type)
+            if any(_keys_differ(table[column], scalar).to_pylist()):
                 break
         else:
             tables_accumulator.append(table)
@@ -93,9 +119,9 @@ def _batch_accumulate_arrow_table_by_columns(
         return table
     # cut the table per key, i.e. when the columns change value
     if len(table) > 1:
-        cut_array = pc.not_equal(table[columns[0]][1:], table[columns[0]][:-1])
+        cut_array = _keys_differ(table[columns[0]][1:], table[columns[0]][:-1])
         for column in columns[1:]:
-            cut_array = pc.or_(cut_array, pc.not_equal(table[column][1:], table[column][:-1]))
+            cut_array = pc.or_(cut_array, _keys_differ(table[column][1:], table[column][:-1]))
     else:
         cut_array = pa.array([], type=pa.uint64())
     offsets = pc.indices_nonzero(cut_array)
